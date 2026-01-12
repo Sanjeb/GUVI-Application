@@ -1,6 +1,7 @@
 <?php
 require "db.php";
 require "redis.php";
+require "mongo.php";
 
 $action = $_POST["action"];
 $token = $_POST["token"];
@@ -19,16 +20,18 @@ if (!$user_id) {
 // FETCH PROFILE
 if ($action === "fetch") {
 
-    $stmt = $conn->prepare("SELECT age, dob, contact FROM users WHERE id = ?");
-    $stmt->bind_param("i", $user_id);
-    $stmt->execute();
+    $query = new MongoDB\Driver\Query(["user_id" => (int)$user_id]);
+    $cursor = $manager->executeQuery("$db.$collection", $query);
 
-    $result = $stmt->get_result();
-    $data = $result->fetch_assoc();
+    $doc = current($cursor->toArray());
 
     echo json_encode([
         "status" => "success",
-        "data" => $data
+        "data" => [
+            "age" => $doc->age ?? "",
+            "dob" => $doc->dob ?? "",
+            "contact" => $doc->contact ?? ""
+        ]
     ]);
 }
 
@@ -40,21 +43,27 @@ if ($action === "update") {
     $dob = $_POST["dob"];
     $contact = $_POST["contact"];
 
-    $stmt = $conn->prepare("UPDATE users SET age = ?, dob = ?, contact = ? WHERE id = ?");
-    $stmt->bind_param("issi", $age, $dob, $contact, $user_id);
+    $bulk = new MongoDB\Driver\BulkWrite;
 
-    if ($stmt->execute()) {
-        echo json_encode([
-            "status" => "success",
-            "message" => "Profile updated"
-        ]);
-    } else {
-        echo json_encode([
-            "status" => "error",
-            "message" => "Update failed"
-        ]);
-    }
+    $bulk->update(
+        ["user_id" => (int)$user_id],
+        ['$set' => [
+            "user_id" => (int)$user_id,
+            "age" => $age,
+            "dob" => $dob,
+            "contact" => $contact
+        ]],
+        ['upsert' => true]
+    );
+
+    $manager->executeBulkWrite("$db.$collection", $bulk);
+
+    echo json_encode([
+        "status" => "success",
+        "message" => "Profile updated"
+    ]);
 }
+
 
 // LOGOUT
 if ($action === "logout") {
